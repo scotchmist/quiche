@@ -29,6 +29,7 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::task::AbortHandle;
+use tokio::task::Builder;
 
 use std::future::Future;
 use std::sync::atomic::AtomicBool;
@@ -96,18 +97,22 @@ impl TaskKillswitch {
         self.activated.load(Ordering::Relaxed)
     }
 
-    fn spawn_task(&self, fut: impl Future<Output = ()> + Send + 'static) {
+    fn spawn_task(
+        &self, fut: impl Future<Output = ()> + Send + 'static, builder: Builder,
+    ) {
         if self.was_activated() {
             return;
         }
 
         let storage = self.storage;
-        let handle = tokio::spawn(async move {
-            let id = task::id();
-            let _guard = RemoveOnDrop { id, storage };
-            fut.await;
-        })
-        .abort_handle();
+        let handle = builder
+            .spawn(async move {
+                let id = task::id();
+                let _guard = RemoveOnDrop { id, storage };
+                fut.await;
+            })
+            .unwrap()
+            .abort_handle();
 
         let res = self.storage.add_task_if(handle, || !self.was_activated());
         if let Err(handle) = res {
@@ -214,7 +219,19 @@ static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
 /// Under the hood, [`tokio::spawn`] schedules the actual execution.
 #[inline]
 pub fn spawn_with_killswitch(fut: impl Future<Output = ()> + Send + 'static) {
-    TASK_KILLSWITCH.spawn_task(fut);
+    TASK_KILLSWITCH.spawn_task(fut, Builder::new());
+}
+
+/// Spawns a new asynchronous task along with userdata and registers it in the crate's global
+/// killswitch.
+///
+/// Under the hood, [`tokio::spawn`] schedules the actual execution.
+#[inline]
+pub fn spawn_with_killswitch_and_userdata(
+    fut: impl Future<Output = ()> + Send + 'static,
+    data: &'static dyn std::any::Any,
+) {
+    TASK_KILLSWITCH.spawn_task(fut, Builder::new().data(data));
 }
 
 #[deprecated = "activate() was unnecessarily declared async. Use activate_now() instead."]
@@ -273,11 +290,16 @@ mod tests {
             .map(|_| {
                 let (tx, rx) = TaskAbortSignal::new();
 
-                killswitch.spawn_task(async move {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3600))
+                killswitch.spawn_task(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(
+                            3600,
+                        ))
                         .await;
-                    drop(tx);
-                });
+                        drop(tx);
+                    },
+                    Builder::new(),
+                );
 
                 rx
             })

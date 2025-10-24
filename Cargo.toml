@@ -62,7 +62,7 @@ slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
-tokio = { version = "1.44", default-features = false }
+tokio = { version = "1.47.1", default-features = false }
 tokio-quiche = { version = "0.10.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
@@ -74,3 +74,6 @@ debug = true
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+tokio = { git = "https://github.com/LloydW93/tokio.git", branch = "lloyd/hookening-rehookened" }
